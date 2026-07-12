@@ -4,18 +4,48 @@ echo   Order Automation - First Time Setup
 echo =============================================
 echo.
 
+:: Check Python 3.11 is available before doing anything else
+py -3.11 -c "print(1)" >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Python 3.11 was not found via the "py" launcher.
+    echo.
+    echo This project requires Python 3.11 specifically - newer versions
+    echo ^(e.g. 3.13, 3.14^) can be missing prebuilt wheels for Playwright/pandas.
+    echo.
+    echo Install it from https://www.python.org/downloads/release/python-3110/
+    echo ^(make sure the "py launcher" option is checked during install^),
+    echo then re-run this script.
+    echo.
+    pause
+    exit /b 1
+)
+
 :: Backend / automation engine setup
-:: Uses Python 3.11 specifically (via the py launcher) - newer versions
-:: (e.g. 3.14) may lack prebuilt wheels for Playwright/pandas.
 echo [1/4] Creating Python virtual environment (Python 3.11)...
 cd order_automation_v2
 py -3.11 -m venv venv
+
+if not exist venv\Scripts\python.exe (
+    echo.
+    echo ERROR: Virtual environment creation failed - venv\Scripts\python.exe was not created.
+    echo Check the output above for the actual error from "py -3.11 -m venv venv".
+    echo.
+    pause
+    exit /b 1
+)
 echo Done.
 echo.
 
 echo [2/4] Installing Python dependencies...
 call venv\Scripts\activate
 pip install -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo ERROR: pip install failed. See the output above for details.
+    echo.
+    pause
+    exit /b 1
+)
 echo Done.
 echo.
 
@@ -43,8 +73,25 @@ cd ..
 
 :: Frontend setup
 echo [4/4] Installing frontend dependencies...
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo ERROR: "npm" was not found on PATH.
+    echo Install Node.js 18+ from https://nodejs.org then re-run this script.
+    echo.
+    pause
+    exit /b 1
+)
+
 cd dashboard\frontend
 call npm install
+if errorlevel 1 (
+    echo.
+    echo ERROR: npm install failed. See the output above for details.
+    echo.
+    pause
+    exit /b 1
+)
 cd ..\..
 echo Done.
 echo.
