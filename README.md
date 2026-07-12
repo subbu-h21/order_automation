@@ -25,7 +25,7 @@ Internal tool for Shubhada Pharma to automate supplier reordering. Scrapes each 
 ### Step 2 — Clone the repo
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/subbu-h21/order_automation.git
 cd order_automation
 ```
 
