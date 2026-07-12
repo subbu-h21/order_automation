@@ -1,0 +1,7 @@
+.claude/
+**/__pycache__/
+*.pyc
+
+# Superseded by order_automation_v2/ - not part of this repo
+/order automation/
+/order automation using browser use/
