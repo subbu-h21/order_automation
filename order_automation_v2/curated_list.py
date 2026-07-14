@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 
-from config import SUPPLIERS, OUTPUT_DIR
+from config import CRM_SUPPLIERS, OUTPUT_DIR
 from crm import sanitize_filename
 
 
@@ -12,7 +12,7 @@ def clean_product_name(name) -> str:
 
 def build_curated_list() -> list:
     merged = {}
-    for supplier in SUPPLIERS:
+    for supplier in CRM_SUPPLIERS:
         path = OUTPUT_DIR / f"{sanitize_filename(supplier)}_orders.xlsx"
         if not path.exists():
             continue

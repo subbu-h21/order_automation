@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel
 
-from config import CHROME_PROFILE_DIR, SUPPLIERS, SUPPLIER_DISTRIBUTOR_NAMES, OUTPUT_DIR, BRANCHES, DEFAULT_BRANCH
+from config import CHROME_PROFILE_DIR, SUPPLIERS, CRM_SUPPLIERS, SUPPLIER_DISTRIBUTOR_NAMES, OUTPUT_DIR, BRANCHES, DEFAULT_BRANCH
 from crm import fetch_orders_for_supplier, sanitize_filename
 from curated_list import build_curated_list
 from retailio import ensure_logged_in, open_supplier_tab
@@ -161,7 +161,7 @@ def _run_pipeline(username: str, password: str) -> None:
 
             _set_phase("fetching_crm")
             crm_page = context.pages[0] if context.pages else context.new_page()
-            for supplier in SUPPLIERS:
+            for supplier in CRM_SUPPLIERS:
                 _log(f"Fetching CRM orders for {supplier}...")
                 df = fetch_orders_for_supplier(crm_page, supplier, username, password)
                 if df.empty:

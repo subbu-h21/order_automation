@@ -106,9 +106,72 @@ def search_all_offers(page: Page, product_name: str) -> list:
     return offers
 
 
-def select_and_add_to_cart(page: Page, product_name: str, index: int, qty: int) -> None:
-    """Re-runs the search (in case the page moved on) and adds the card at
-    the given index to the cart with the given quantity."""
+def _capped_qty(requested_qty: int, inventory: dict | None) -> int:
+    """Clamps/rounds requested_qty to respect this batch's hidden per-order
+    rules, read live off Retailio's own Angular scope (never shown on the
+    card). A rule value of 0/None means "not set" on Retailio - only a
+    positive value is a real constraint (confirmed empirically: maxSaleQty=0
+    batches accept arbitrarily large quantities, maxSaleQty=2 batches reject
+    anything above 2). Returns 0 if the batch's minimum order requirement
+    can't be met without exceeding requested_qty."""
+    if not inventory:
+        return requested_qty
+
+    qty = requested_qty
+
+    max_sale_qty = inventory.get("maxSaleQty") or 0
+    if max_sale_qty > 0:
+        qty = min(qty, max_sale_qty)
+
+    min_sale_qty = inventory.get("minSaleQty") or 0
+    if min_sale_qty > 1:
+        qty = (qty // min_sale_qty) * min_sale_qty
+
+    min_order_qty = inventory.get("minimumOrderQuantity") or 0
+    if min_order_qty > 0 and qty < min_order_qty:
+        qty = 0
+
+    return qty
+
+
+def _wait_for_full_inventory(add_button, page: Page, timeout_ms: int = 6000, poll_ms: int = 150) -> dict | None:
+    """The Add to Cart button becomes visible before Angular finishes
+    populating scope().selectedProduct.inventory via its async product-detail
+    call - reading it immediately can return a partial object (e.g. just
+    {'stock': N}) with maxSaleQty/minSaleQty/minimumOrderQuantity missing
+    entirely, which would look like "no limit" if used as-is. Poll until the
+    full object shows up (recognizable by the maxSaleQty key being present).
+
+    Returns None if it never shows up within timeout_ms. The caller must
+    treat None as "couldn't confirm the real limit" - NOT as "no limit
+    exists" - and decline to add to cart rather than silently assume
+    unlimited, since that's exactly the scenario that caused the original
+    30s-hang bug."""
+    elapsed = 0
+    while elapsed <= timeout_ms:
+        inventory = add_button.evaluate(
+            """
+            (btn) => {
+                if (!window.angular) return null;
+                const scope = angular.element(btn).scope();
+                return scope && scope.selectedProduct ? scope.selectedProduct.inventory : null;
+            }
+            """
+        )
+        if inventory and "maxSaleQty" in inventory:
+            return inventory
+        page.wait_for_timeout(poll_ms)
+        elapsed += poll_ms
+    return None
+
+
+def select_and_add_to_cart(page: Page, product_name: str, index: int, qty: int, on_progress=None) -> int:
+    """Re-runs the search (in case the page moved on), opens the card at the
+    given index, and adds up to `qty` units to the cart - capped/rounded to
+    respect this batch's hidden per-order limits (see _capped_qty). Returns
+    the quantity actually added, which may be less than `qty` or 0 if this
+    batch's rules can't accommodate the request, or if its hidden limits
+    couldn't be confirmed in time (skipped rather than risk over-ordering)."""
     search_input = page.get_by_placeholder("Search for a product")
     search_input.wait_for(state="visible", timeout=10000)
     search_input.fill("")
@@ -119,15 +182,34 @@ def select_and_add_to_cart(page: Page, product_name: str, index: int, qty: int) 
     card.wait_for(state="visible", timeout=10000)
     card.click()
 
+    add_button = page.get_by_role("button", name="Add to Cart")
+    add_button.wait_for(state="visible", timeout=10000)
+
+    inventory = _wait_for_full_inventory(add_button, page)
+    if inventory is None:
+        if on_progress:
+            on_progress(
+                f"{product_name}: couldn't confirm this batch's hidden order-quantity "
+                f"limits in time - skipping it to be safe rather than risk over-ordering"
+            )
+        close_modal(page)
+        return 0
+
+    actual_qty = _capped_qty(qty, inventory)
+
+    if actual_qty <= 0:
+        close_modal(page)
+        return 0
+
     qty_input = page.locator("#distributor-specific-order-quantity")
     qty_input.wait_for(state="visible", timeout=10000)
-    qty_input.fill(str(qty))
+    qty_input.fill(str(actual_qty))
 
-    add_button = page.get_by_role("button", name="Add to Cart")
     add_button.click()
     page.wait_for_timeout(1000)
 
     close_modal(page)
+    return actual_qty
 
 
 def close_modal(page: Page) -> None:

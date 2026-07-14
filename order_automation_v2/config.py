@@ -21,14 +21,32 @@ BRANCHES = {
 }
 DEFAULT_BRANCH = "HOSPET ROAD"
 
-SUPPLIERS = ["DRK ENTERPRISES", "A.K.PHARMA", "MAHAVEER MEDI-SALES PVT.LTD."]
+# Real-world vendor accounts, as the CRM's Saved PO / reorder system knows
+# them. Used only to fetch reorder suggestions and build the curated product
+# list - the CRM has no concept of A.K.PHARMA's two Retailio distributor
+# accounts below, it's one vendor relationship to the pharmacy.
+CRM_SUPPLIERS = ["DRK ENTERPRISES", "A.K.PHARMA", "MAHAVEER MEDI-SALES PVT.LTD."]
 
-# Priority order == order of SUPPLIERS above (highest discount first).
-# Each supplier maps to the distributor row name(s) to tick on Retailio's
+# Retailio distributor tabs to search/allocate against, in priority order
+# (highest discount first). A.K.PHARMA is split into its two Retailio
+# distributor accounts (Outstation / Davangere): Retailio surfaces them as
+# separate catalogs with independent stock and hidden per-order limits, so
+# treating them as one combined tab (the old behavior) caused the same
+# product to show up twice under near-identical names with no way to fall
+# back from one to the other when one hit a hidden quantity cap.
+SUPPLIERS = [
+    "DRK ENTERPRISES",
+    "A.K.PHARMA (OUTSTATION)",
+    "A.K.PHARMA (DAVANGERE)",
+    "MAHAVEER MEDI-SALES PVT.LTD.",
+]
+
+# Each entry maps to the distributor row name(s) to tick on Retailio's
 # distributor-picker page for its dedicated tab.
 SUPPLIER_DISTRIBUTOR_NAMES = {
     "DRK ENTERPRISES": ["Drk Enterprises"],
-    "A.K.PHARMA": ["A K Pharma - Outstation", "A K Pharma, Davangere"],
+    "A.K.PHARMA (OUTSTATION)": ["A K Pharma - Outstation"],
+    "A.K.PHARMA (DAVANGERE)": ["A K Pharma, Davangere"],
     "MAHAVEER MEDI-SALES PVT.LTD.": ["Mahaveer Medi Sales"],
 }
 

@@ -88,25 +88,34 @@ def allocate_product(pages: dict, item: dict, on_progress=None) -> None:
         )
 
         offer = offers[winner]
-        allocated_qty = min(item["remaining_qty"], offer["available_qty"])
+        requested_qty = min(item["remaining_qty"], offer["available_qty"])
 
-        select_and_add_to_cart(pages[winner], item["product_name"], offer["index"], allocated_qty)
+        added_qty = select_and_add_to_cart(
+            pages[winner], item["product_name"], offer["index"], requested_qty, on_progress=on_progress
+        )
 
-        item["allocations"].append({
-            "supplier": winner,
-            "qty": allocated_qty,
-            "has_scheme": offer["has_scheme"],
-            "card_text": offer["card_text"],
-            "matched_product_name": offer["matched_product_name"],
-        })
-        item["remaining_qty"] -= allocated_qty
-        exhausted.add(winner)
+        if added_qty > 0:
+            item["allocations"].append({
+                "supplier": winner,
+                "qty": added_qty,
+                "has_scheme": offer["has_scheme"],
+                "card_text": offer["card_text"],
+                "matched_product_name": offer["matched_product_name"],
+            })
+            item["remaining_qty"] -= added_qty
 
-        if on_progress:
+            if on_progress:
+                on_progress(
+                    f"{item['product_name']}: allocated {added_qty} to {winner} "
+                    f"(matched \"{offer['matched_product_name']}\")"
+                )
+        elif on_progress:
             on_progress(
-                f"{item['product_name']}: allocated {allocated_qty} to {winner} "
-                f"(matched \"{offer['matched_product_name']}\")"
+                f"{item['product_name']}: {winner}'s batch \"{offer['matched_product_name']}\" "
+                f"couldn't satisfy this order's hidden quantity rules (min/max order limits) - skipped"
             )
+
+        exhausted.add(winner)
 
     if item["remaining_qty"] > 0 and on_progress:
         on_progress(
