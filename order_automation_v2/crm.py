@@ -1,6 +1,6 @@
 import re
 import pandas as pd
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from config import CRM_URL
 
@@ -46,7 +46,12 @@ def fetch_supplier_orders(page: Page, supplier: str) -> pd.DataFrame:
     view_details = page.locator(
         f"xpath=//tr[td[contains(normalize-space(.),'{supplier}')]]//span[text()='View Details']"
     )
-    view_details.wait_for(state="visible", timeout=15000)
+    try:
+        view_details.wait_for(state="visible", timeout=15000)
+    except PlaywrightTimeoutError:
+        # Supplier has no pending Saved PO items today, so it doesn't appear
+        # in the list at all - not an error, just nothing to fetch.
+        return pd.DataFrame()
     view_details.click()
 
     table = page.locator("#itemTab")
