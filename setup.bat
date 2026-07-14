@@ -4,15 +4,15 @@ echo   Order Automation - First Time Setup
 echo =============================================
 echo.
 
-:: Check Python 3.11 is available before doing anything else
-py -3.11 -c "print(1)" >nul 2>&1
+:: Check Python 3.11+ is available before doing anything else
+:: (pandas/numpy in requirements.txt require Python >=3.11)
+py -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python 3.11 was not found via the "py" launcher.
+    echo ERROR: Python 3.11 or newer was not found via the "py" launcher.
     echo.
-    echo This project requires Python 3.11 specifically - newer versions
-    echo ^(e.g. 3.13, 3.14^) can be missing prebuilt wheels for Playwright/pandas.
+    echo This project requires Python 3.11+ ^(pandas/numpy need it^).
     echo.
-    echo Install it from https://www.python.org/downloads/release/python-3110/
+    echo Install it from https://www.python.org/downloads
     echo ^(make sure the "py launcher" option is checked during install^),
     echo then re-run this script.
     echo.
@@ -21,9 +21,9 @@ if errorlevel 1 (
 )
 
 :: Backend / automation engine setup
-echo [1/4] Creating Python virtual environment (Python 3.11)...
+echo [1/4] Creating Python virtual environment...
 cd order_automation_v2
-py -3.11 -m venv venv
+py -m venv venv
 
 if not exist venv\Scripts\python.exe (
     echo.

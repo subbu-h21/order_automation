@@ -18,7 +18,7 @@ Internal tool for Shubhada Pharma to automate supplier reordering. Scrapes each 
 
 | Tool | Download |
 |---|---|
-| Python 3.11 | https://python.org/downloads — **exact version matters**: `setup.bat` pins to `py -3.11` specifically, since newer versions (e.g. 3.14) can lack prebuilt wheels for Playwright/pandas |
+| Python 3.11+ | https://python.org/downloads — `setup.bat` checks for 3.11 or newer (pandas/numpy in `requirements.txt` require Python >=3.11) |
 | Node.js 18+ | https://nodejs.org |
 | Git | https://git-scm.com |
 
@@ -34,7 +34,7 @@ cd order_automation
 Double-click **`setup.bat`** in the project folder.
 
 This will automatically:
-- Create the Python virtual environment (`order_automation_v2/venv`, using Python 3.11)
+- Create the Python virtual environment (`order_automation_v2/venv`, using Python 3.11+)
 - Install all Python dependencies (`requirements.txt`)
 - Install the Playwright Chromium browser
 - Create `order_automation_v2\.env` from `.env.example`
