@@ -18,7 +18,7 @@ Internal tool for Shubhada Pharma to automate supplier reordering. Scrapes each 
 
 | Tool | Download |
 |---|---|
-| Python 3.11+ | https://python.org/downloads — `setup.bat` checks for 3.11 or newer (pandas/numpy in `requirements.txt` require Python >=3.11) |
+| Python 3.11+ | https://python.org/downloads — pandas/numpy in `requirements.txt` require Python >=3.11; `setup.bat` does not check this, so pick 3.11 or newer yourself |
 | Node.js 18+ | https://nodejs.org |
 | Git | https://git-scm.com |
 

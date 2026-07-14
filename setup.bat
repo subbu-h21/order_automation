@@ -4,31 +4,16 @@ echo   Order Automation - First Time Setup
 echo =============================================
 echo.
 
-:: Check Python 3.11+ is available before doing anything else
-:: (pandas/numpy in requirements.txt require Python >=3.11)
-py -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python 3.11 or newer was not found via the "py" launcher.
-    echo.
-    echo This project requires Python 3.11+ ^(pandas/numpy need it^).
-    echo.
-    echo Install it from https://www.python.org/downloads
-    echo ^(make sure the "py launcher" option is checked during install^),
-    echo then re-run this script.
-    echo.
-    pause
-    exit /b 1
-)
-
 :: Backend / automation engine setup
 echo [1/4] Creating Python virtual environment...
 cd order_automation_v2
-py -m venv venv
+python -m venv venv
 
 if not exist venv\Scripts\python.exe (
     echo.
     echo ERROR: Virtual environment creation failed - venv\Scripts\python.exe was not created.
-    echo Check the output above for the actual error from "py -3.11 -m venv venv".
+    echo Check the output above for the actual error from "python -m venv venv".
+    echo Make sure Python 3.11+ is installed and on PATH.
     echo.
     pause
     exit /b 1
