@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 const API_BASE = "";
@@ -68,16 +68,11 @@ function App() {
   const [starting, setStarting] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
-  const intervalRef = useRef<number | null>(null);
 
   const poll = async () => {
     const res = await fetch(`${API_BASE}/status`);
     const data: Status = await res.json();
     setStatus(data);
-    if (data.done && intervalRef.current) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
   };
 
   const handleFetchOrder = async () => {
@@ -89,7 +84,6 @@ function App() {
     });
     setStarting(false);
     poll();
-    intervalRef.current = window.setInterval(poll, 1500);
   };
 
   useEffect(() => {
@@ -100,8 +94,26 @@ function App() {
         setBranches(data.branches);
         setSelectedBranch(data.default);
       });
+    // Every open tab/device keeps polling the shared backend state
+    // continuously, not just the one that clicked "Fetch Order" - so
+    // everyone watching stays in sync regardless of who started the run.
+    const intervalId = window.setInterval(poll, 1500);
+
+    // Browsers throttle setInterval in backgrounded tabs (down to ~1/min
+    // after a few minutes) to save battery/CPU - that's platform policy,
+    // not something JS can override. So also poll immediately the moment
+    // a tab becomes visible/focused again, so it snaps to current state
+    // instantly instead of showing whatever it was stuck on.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", poll);
+
     return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
