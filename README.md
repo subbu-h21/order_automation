@@ -71,7 +71,7 @@ This builds the frontend, starts the backend in its own window, and automaticall
 Run backend and frontend separately so the frontend hot-reloads:
 
 ```bash
-cd order_automation_v2 && venv\Scripts\activate && python -m uvicorn app:app --app-dir ..\dashboard\backend --port 8000   # API on :8000
+cd order_automation_v2 && venv\Scripts\activate && python -m uvicorn app:app --app-dir ..\dashboard\backend --host 0.0.0.0 --port 8000   # API on :8000, reachable from other devices on the LAN
 cd dashboard\frontend && npm run dev                                                                                       # Vite dev server on :5174 (or next free port), proxies to :8000
 ```
 

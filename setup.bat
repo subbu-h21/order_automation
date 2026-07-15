@@ -48,6 +48,8 @@ if not exist .env (
     echo  - CRM_USERNAME / CRM_PASSWORD
     echo  - CRM_USERNAME_SHIVAJI_CHOWK / CRM_PASSWORD_SHIVAJI_CHOWK
     echo  - CHROME_PROFILE_DIR
+    echo  - SESSION_SECRET_KEY - generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    echo  - DASHBOARD_USERS - staff login accounts; generate each one with: python hash_password.py
     echo.
 ) else (
     echo order_automation_v2\.env already exists, skipping.

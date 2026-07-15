@@ -5,17 +5,31 @@
   font-family: system-ui, sans-serif;
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .controls {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-select {
+select,
+input[type="text"],
+input[type="password"] {
   padding: 9px 12px;
   font-size: 15px;
   border-radius: 6px;
   border: 1px solid #ccc;
+}
+
+.logout-button {
+  background-color: #999;
+  padding: 8px 16px;
+  font-size: 14px;
 }
 
 button {
@@ -44,6 +58,11 @@ button:disabled {
 .phase {
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.started-by {
+  font-weight: 400;
+  color: #666;
 }
 
 .log {

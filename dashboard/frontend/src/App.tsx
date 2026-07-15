@@ -61,6 +61,7 @@ interface Status {
   done: boolean;
   result: Result | null;
   error: string | null;
+  started_by: string | null;
 }
 
 function App() {
@@ -68,9 +69,20 @@ function App() {
   const [starting, setStarting] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   const poll = async () => {
     const res = await fetch(`${API_BASE}/status`);
+    if (res.status === 401) {
+      // Session died mid-use (logged out elsewhere, secret rotated, etc.) -
+      // fall back to the login form instead of rendering stale/null status.
+      setAuthenticated(false);
+      return;
+    }
     const data: Status = await res.json();
     setStatus(data);
   };
@@ -86,7 +98,46 @@ function App() {
     poll();
   };
 
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch(`${API_BASE}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      });
+      if (res.ok) {
+        setLoginPassword("");
+        setAuthenticated(true);
+      } else if (res.status === 429) {
+        setLoginError("Too many failed attempts. Try again in a few minutes.");
+      } else {
+        setLoginError("Invalid username or password.");
+      }
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch(`${API_BASE}/logout`, { method: "POST" });
+    setAuthenticated(false);
+    setStatus(null);
+  };
+
+  // Checked once on mount, independent of the polling loop below - this is
+  // what decides whether to show the login form or the dashboard.
   useEffect(() => {
+    fetch(`${API_BASE}/me`)
+      .then((res) => setAuthenticated(res.ok))
+      .catch(() => setAuthenticated(false));
+  }, []);
+
+  useEffect(() => {
+    if (authenticated !== true) return;
+
     poll();
     fetch(`${API_BASE}/branches`)
       .then((res) => res.json())
@@ -116,14 +167,56 @@ function App() {
       window.removeEventListener("focus", poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authenticated]);
 
   const isRunning = status?.running ?? false;
   const phaseLabel = status ? PHASE_LABELS[status.phase] ?? status.phase : "";
 
+  if (authenticated === null) {
+    return (
+      <div className="dashboard">
+        <h1>Order Automation</h1>
+      </div>
+    );
+  }
+
+  if (authenticated === false) {
+    return (
+      <div className="dashboard">
+        <h1>Order Automation</h1>
+        <form className="controls" onSubmit={handleLogin}>
+          <input
+            type="text"
+            placeholder="Username"
+            value={loginUsername}
+            onChange={(e) => setLoginUsername(e.target.value)}
+            autoFocus
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={loginPassword}
+            onChange={(e) => setLoginPassword(e.target.value)}
+          />
+          <button type="submit" disabled={loggingIn || !loginUsername || !loginPassword}>
+            {loggingIn ? "Logging in..." : "Log in"}
+          </button>
+        </form>
+        {loginError && (
+          <div className="error">
+            <pre>{loginError}</pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard">
-      <h1>Order Automation</h1>
+      <div className="header-row">
+        <h1>Order Automation</h1>
+        <button className="logout-button" onClick={handleLogout}>Log out</button>
+      </div>
 
       <div className="controls">
         <select
@@ -143,7 +236,10 @@ function App() {
 
       {status && (status.running || status.phase !== "idle") && (
         <div className="progress">
-          <div className="phase">{phaseLabel}</div>
+          <div className="phase">
+            {phaseLabel}
+            {status.started_by && <span className="started-by"> — started by {status.started_by}</span>}
+          </div>
           <div className="log">
             {status.log.map((line, i) => (
               <div key={i} className="log-line">{line}</div>

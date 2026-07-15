@@ -5,13 +5,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "order_automation_v2"))
 
-from fastapi import FastAPI
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from playwright.sync_api import sync_playwright
 from pydantic import BaseModel
 
 from config import CHROME_PROFILE_DIR, SUPPLIERS, CRM_SUPPLIERS, SUPPLIER_DISTRIBUTOR_NAMES, OUTPUT_DIR, BRANCHES, DEFAULT_BRANCH
+from auth import (
+    check_rate_limit,
+    clear_failed_attempts,
+    record_failed_attempt,
+    sign_session,
+    verify_password,
+    verify_session,
+)
 from crm import fetch_orders_for_supplier, sanitize_filename
 from curated_list import build_curated_list
 from retailio import ensure_logged_in, open_supplier_tab
@@ -25,6 +33,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+COOKIE_NAME = "dashboard_session"
+
+
+def get_current_user(session: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> str:
+    if session is None:
+        raise HTTPException(status_code=401, detail="not_authenticated")
+    username = verify_session(session)
+    if username is None:
+        raise HTTPException(status_code=401, detail="invalid_session")
+    return username
+
+
 _lock = threading.Lock()
 _state = {
     "running": False,
@@ -33,6 +53,7 @@ _state = {
     "done": False,
     "result": None,
     "error": None,
+    "started_by": None,
 }
 
 
@@ -204,8 +225,45 @@ class FetchOrderRequest(BaseModel):
     branch: str = DEFAULT_BRANCH
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/login")
+def login(request: LoginRequest, response: Response):
+    if not check_rate_limit(request.username):
+        raise HTTPException(status_code=429, detail="too_many_attempts")
+
+    if not verify_password(request.username, request.password):
+        record_failed_attempt(request.username)
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+
+    clear_failed_attempts(request.username)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=sign_session(request.username),
+        httponly=True,
+        samesite="lax",
+        secure=False,  # reached over plain HTTP on the LAN; see CLAUDE.md
+        path="/",
+    )
+    return {"username": request.username}
+
+
+@app.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@app.get("/me")
+def me(current_user: str = Depends(get_current_user)):
+    return {"username": current_user}
+
+
 @app.post("/fetch-order")
-def fetch_order(request: FetchOrderRequest):
+def fetch_order(request: FetchOrderRequest, current_user: str = Depends(get_current_user)):
     if request.branch not in BRANCHES:
         return {"started": False, "reason": "unknown_branch"}
 
@@ -218,6 +276,7 @@ def fetch_order(request: FetchOrderRequest):
         _state["done"] = False
         _state["result"] = None
         _state["error"] = None
+        _state["started_by"] = current_user
 
     credentials = BRANCHES[request.branch]
     thread = threading.Thread(
@@ -230,12 +289,12 @@ def fetch_order(request: FetchOrderRequest):
 
 
 @app.get("/branches")
-def branches():
+def branches(current_user: str = Depends(get_current_user)):
     return {"branches": list(BRANCHES.keys()), "default": DEFAULT_BRANCH}
 
 
 @app.get("/status")
-def status():
+def status(current_user: str = Depends(get_current_user)):
     with _lock:
         return dict(_state)
 

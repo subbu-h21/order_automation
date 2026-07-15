@@ -13,7 +13,7 @@ Stack: React + Vite + TypeScript frontend, Python + FastAPI + Uvicorn backend, P
 Day-to-day development (run backend and frontend separately so the frontend hot-reloads):
 
 ```bash
-cd order_automation_v2 && venv\Scripts\activate && python -m uvicorn app:app --app-dir ..\dashboard\backend --port 8000   # API on :8000
+cd order_automation_v2 && venv\Scripts\activate && python -m uvicorn app:app --app-dir ..\dashboard\backend --host 0.0.0.0 --port 8000   # API on :8000, reachable from other devices on the LAN
 cd dashboard\frontend && npm run dev                                                                                       # Vite dev server, proxies to :8000
 ```
 
@@ -27,7 +27,7 @@ There is no test suite (frontend or backend) and no backend lint/format command 
 
 Production-style run: `start.bat` builds the frontend, starts the backend in its own window (serving both the API and the built frontend from one FastAPI process on :8000), and opens the browser once ready. `setup.bat` does first-time machine setup (Python 3.11 venv, pip install, `playwright install chromium`, `.env` scaffolding, `npm install`).
 
-First-time/new-machine setup requires **Python 3.11 specifically** (`py -3.11`) — newer versions can lack prebuilt wheels for Playwright/pandas. See [README.md](README.md) for full setup steps and the required `.env` variables (`CRM_USERNAME`, `CRM_PASSWORD`, `CRM_USERNAME_SHIVAJI_CHOWK`, `CRM_PASSWORD_SHIVAJI_CHOWK`, `CHROME_PROFILE_DIR`).
+First-time/new-machine setup requires **Python 3.11 specifically** (`py -3.11`) — newer versions can lack prebuilt wheels for Playwright/pandas. See [README.md](README.md) for full setup steps and the required `.env` variables (`CRM_USERNAME`, `CRM_PASSWORD`, `CRM_USERNAME_SHIVAJI_CHOWK`, `CRM_PASSWORD_SHIVAJI_CHOWK`, `CHROME_PROFILE_DIR`, `SESSION_SECRET_KEY`, `DASHBOARD_USERS`). The last two gate dashboard login (see Authentication below) — without them, `config.py` fails to import at all (fail-fast, deliberate).
 
 ## Architecture
 
@@ -58,15 +58,32 @@ Both modules are pure Playwright locator/selector code against two live external
 
 ### Backend (dashboard/backend/app.py)
 
-Single-file FastAPI app holding one global `_state` dict (guarded by `_lock`) representing the one-run-at-a-time pipeline: `running`, `phase`, `log`, `done`, `result`, `error`. No persistence/DB — state resets on every `/fetch-order` call and is lost on server restart. Endpoints:
-- `POST /fetch-order {branch}` — starts the pipeline in a background thread if not already running; branch selects which CRM credentials from `config.BRANCHES` to use.
-- `GET /status` — full state snapshot; the frontend polls this every 1.5s while running.
+Single-file FastAPI app holding one global `_state` dict (guarded by `_lock`) representing the one-run-at-a-time pipeline: `running`, `phase`, `log`, `done`, `result`, `error`. This state is shared by every client that hits the server - not per-session, per-tab, or per-device - which is what makes the multi-viewer behavior below work. No persistence/DB - state resets on every `/fetch-order` call and is lost on server restart. Endpoints:
+- `POST /fetch-order {branch}` — starts the pipeline in a background thread if not already running (guarded by the same `_lock`/`_state["running"]` check, so a second click anywhere - another tab, another device - while a run is active never starts a duplicate pipeline); branch selects which CRM credentials from `config.BRANCHES` to use.
+- `GET /status` — full state snapshot; every open frontend tab/device polls this every 1.5s continuously (see Frontend below), not just the one that triggered a run.
 - `GET /branches` — available branches + default, for the branch picker.
 - Static file mount at `/` serves `dashboard/frontend/dist` (the built frontend) — this is why `start.bat` builds the frontend before starting the backend, and why the backend `sys.path`-inserts `order_automation_v2` at import time rather than that being an installed package.
 
+`start.bat`/the dev uvicorn command bind to `--host 0.0.0.0` (not the default `127.0.0.1`-only) specifically so other devices on the same LAN (e.g. a phone) can reach it. The dashboard is also reachable from the public internet via a Cloudflare named tunnel (configured outside this repo, in the Cloudflare Zero Trust dashboard, routing a public hostname to `localhost:8000`) - see Authentication below for how access is actually restricted, since neither of those alone gates who can use it.
+
+### Authentication (`order_automation_v2/auth.py`, `dashboard/backend/app.py`)
+
+Individual staff accounts, provisioned by hand-editing `.env` (no DB, no admin UI, no self-signup - matches how `CRM_USERNAME`/`CRM_PASSWORD`/etc. already work in this codebase). Generate a new account's credential with `python hash_password.py` (prompts via `getpass`, never plain CLI args - avoids leaking passwords into shell history) and paste the printed `salt$hash` into `DASHBOARD_USERS` in `.env` as `username:salt$hash` (comma-separated for multiple staff).
+
+- **Password verification** (`auth.verify_password`): `hashlib.pbkdf2_hmac`, 600k iterations, stdlib only (no bcrypt/passlib). Always runs one PBKDF2 pass even for an unknown username (against a precomputed dummy salt/hash) and always compares with `hmac.compare_digest` - skipping either of those turns response timing into a way to enumerate valid usernames.
+- **Brute-force protection** (`auth.check_rate_limit`): in-memory, per-*username* (5 failed attempts / 5 min → `429`), not per-IP. IP-based limiting doesn't work here - `cloudflared` proxies tunnel traffic to `localhost`, so every tunnel request looks like it's from `127.0.0.1` regardless of the real caller.
+- **Session cookie**: `itsdangerous.URLSafeSerializer` (not `URLSafeTimedSerializer` - no server-side expiry check). Session length is enforced purely by the cookie having no `Max-Age`/`Expires` set, so it's a true browser-session cookie (dies when the browser fully closes), per a deliberate product decision to not have long-lived "remember me" sessions. Flags: `httponly=True`, `samesite="lax"`, **`secure=False`** - the last one is deliberate, not an oversight: the app is reached over plain HTTP on the LAN as well as HTTPS via the tunnel, and `secure=True` would silently break LAN login since the browser would refuse to send the cookie over plain HTTP.
+- **No CSRF token** - not an oversight either. `SameSite=Lax` doesn't attach the cookie to cross-site `POST`s (only top-level `GET` navigations), and `/login`/`/logout`/`/fetch-order` are all `POST`. CORS `allow_credentials` is unset, so a cross-origin page can't read authenticated `GET` responses either.
+- **Logout is client-side cookie deletion only** - there's no server-side revocation list. A captured token remains valid until the browser closes or `SESSION_SECRET_KEY` is rotated. **If a leak is suspected, the fix is: rotate `SESSION_SECRET_KEY` and restart the process** - that invalidates every existing session at once.
+- **Cross-origin cookie scoping is expected, not a bug**: the LAN IP (`http://<pc-ip>:8000`) and the tunnel hostname (`https://...`) are different origins - logging in on one does not carry over to the other. Don't "fix" this later by accident.
+- The static frontend mount (`/`) stays unauthenticated on purpose - the SPA shell itself isn't sensitive, it just won't get real data until `/me` succeeds. Only `/fetch-order`, `/status`, `/branches` (and `/me` itself) require the session, via the `get_current_user` FastAPI dependency in `app.py`.
+- `_state["started_by"]` records which staff member triggered the current/last run (set in `/fetch-order` from the authenticated user) - basic accountability given this tool spends real money, not a full audit log.
+
 ### Frontend (dashboard/frontend/src/App.tsx)
 
-Single-component app: branch dropdown → "Fetch Order" button → polls `/status` on a 1.5s interval until `done`, rendering `phase`/`log` as progress and then four result tables (Missed / Needs Review / Altered-Split / full Product Mapping) from the final `result`. No routing, no state library — all local `useState`.
+Single-component app: login form (if unauthenticated) → branch dropdown → "Fetch Order" button → four result tables (Missed / Needs Review / Altered-Split / full Product Mapping) rendered from `status.result` once done. No routing, no state library — all local `useState`.
+
+Two mount effects, deliberately separate: one runs once and calls `GET /me` to decide `authenticated` (null while checking, then true/false); the second depends on `[authenticated]` and only starts polling once `authenticated === true`. **The polling mechanism itself must not be touched independent of this gating** - it's deliberately continuous and shared, not per-action: every tab/device polls `/status` every 1.5s from mount for as long as it's open, regardless of whether that tab is the one that clicked "Fetch Order" - since the backend state is global (see Backend above), this means every open viewer (different tabs, different devices) shows the same live phase/log/result simultaneously. A `visibilitychange`/`focus` listener also forces an immediate poll when a tab becomes active again, since Chrome throttles `setInterval` in backgrounded tabs (confirmed empirically: an unfocused tab can drop to 0 polls until refocused). `poll()` also doubles as the "is my session still valid" check for the whole session, not just at mount - a `401` response flips `authenticated` back to `false` and shows the login form again, rather than erroring on a stale/null status.
 
 ### Config (`order_automation_v2/config.py`)
 
