@@ -10,7 +10,9 @@ def sanitize_filename(name: str) -> str:
 
 
 def login(page: Page, username: str, password: str) -> None:
-    page.goto(CRM_URL)
+    # The CRM can be slow to load; give it more room than Playwright's
+    # 30s default before treating it as a real failure.
+    page.goto(CRM_URL, timeout=120000)
     page.locator('input[name="user"]').fill(username)
     password_field = page.locator('input[name="pass"]')
     password_field.fill(password)
