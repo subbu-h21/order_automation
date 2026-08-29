@@ -75,6 +75,7 @@ _state = {
     "stage": "idle",
     "proposal": None,
     "confirmed_by": None,
+    "branch": None,
 }
 
 
@@ -90,6 +91,7 @@ def _load_persisted_proposal() -> None:
     _state["result"] = persisted.get("result")
     _state["started_by"] = persisted.get("started_by")
     _state["confirmed_by"] = persisted.get("confirmed_by")
+    _state["branch"] = persisted.get("branch")
     _state["done"] = True
     _state["phase"] = "done"
 
@@ -117,6 +119,7 @@ def _persist_state() -> None:
                 "result": _state["result"],
                 "started_by": _state["started_by"],
                 "confirmed_by": _state["confirmed_by"],
+                "branch": _state["branch"],
             }
 
     if snapshot is None:
@@ -423,6 +426,7 @@ def fetch_order(request: FetchOrderRequest, current_user: str = Depends(get_curr
         _state["proposal"] = None
         _state["started_by"] = current_user
         _state["confirmed_by"] = None
+        _state["branch"] = request.branch
     proposal_store.clear_proposal()
 
     credentials = BRANCHES[request.branch]

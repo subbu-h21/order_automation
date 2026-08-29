@@ -168,6 +168,7 @@ interface Status {
   stage: string;
   proposal: Proposal | null;
   confirmed_by: string | null;
+  branch: string | null;
 }
 
 // The one shape used throughout the brand: a two-piece capsule. Doubles as
@@ -776,6 +777,12 @@ function App() {
             <div ref={logEndRef} />
           </div>
         </div>
+      )}
+
+      {status?.branch && (
+        <p className="branch-banner">
+          Orders for the <strong>{status.branch}</strong> branch.
+        </p>
       )}
 
       {status?.error && (

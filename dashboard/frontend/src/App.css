@@ -637,6 +637,17 @@ tbody tr:hover {
   margin-top: 2px;
 }
 
+.branch-banner {
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  margin: -4px 0 20px;
+}
+
+.branch-banner strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 /* ---------- Proposal review ---------- */
 
 .review {
