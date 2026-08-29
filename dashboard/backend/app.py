@@ -154,6 +154,8 @@ def _build_result(curated_list: list) -> dict:
                 "supplier": alloc["supplier"],
                 "qty": alloc["qty"],
                 "has_scheme": alloc["has_scheme"],
+                "scheme_buy_qty": alloc.get("scheme_buy_qty"),
+                "scheme_free_qty": alloc.get("scheme_free_qty"),
             })
 
         has_any_allocation = len(item["allocations"]) > 0
@@ -192,6 +194,19 @@ def _build_result(curated_list: list) -> dict:
     }
 
 
+def _scheme_label(alloc: dict) -> str:
+    """'14+1' when the real buy/free numbers were parsed off the card,
+    'Yes'/blank as a fallback for the rare case a card says "Scheme:" in
+    some other format retailio.py's regex doesn't recognize."""
+    if not alloc.get("has_scheme"):
+        return ""
+    buy_qty = alloc.get("scheme_buy_qty")
+    free_qty = alloc.get("scheme_free_qty")
+    if buy_qty is not None and free_qty is not None:
+        return f"{buy_qty}+{free_qty}"
+    return "Yes"
+
+
 def _write_excel_report(curated_list: list) -> None:
     import pandas as pd
 
@@ -205,7 +220,7 @@ def _write_excel_report(curated_list: list) -> None:
                 "Required Qty": item["required_qty"],
                 "Supplier": alloc["supplier"],
                 "Allocated Qty": alloc["qty"],
-                "Has Scheme": alloc["has_scheme"],
+                "Scheme": _scheme_label(alloc),
                 "Retailio Product": alloc["matched_product_name"],
             })
         if item["remaining_qty"] > 0:

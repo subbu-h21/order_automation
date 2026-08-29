@@ -195,6 +195,8 @@ def commit_selections(pages: dict, selections: list, on_progress=None) -> list:
                         "supplier": supplier,
                         "qty": added_qty,
                         "has_scheme": match["has_scheme"],
+                        "scheme_buy_qty": match.get("scheme_buy_qty"),
+                        "scheme_free_qty": match.get("scheme_free_qty"),
                         "card_text": match["card_text"],
                         "matched_product_name": match["matched_product_name"],
                     })

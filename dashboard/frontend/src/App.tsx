@@ -123,6 +123,8 @@ interface Mapping {
   supplier: string;
   qty: number;
   has_scheme: boolean;
+  scheme_buy_qty: number | null;
+  scheme_free_qty: number | null;
 }
 
 interface AlteredItem {
@@ -241,6 +243,24 @@ function money(value: number | null): string {
   return value == null ? "—" : `₹${value.toFixed(2)}`;
 }
 
+// "14+1" (buy 14, get 1 free) when the real numbers were parsed off the
+// card; falls back to a bare "Scheme" for the rare case a card says
+// "Scheme:" in some format retailio.py's regex doesn't recognize. Pass
+// `withWord: true` to append the word itself (", 14+1 scheme") for use
+// outside a context that already labels the value as a scheme (e.g. a
+// table column already headed "Scheme" doesn't need it repeated).
+function schemeLabel(
+  offer: { has_scheme: boolean; scheme_buy_qty: number | null; scheme_free_qty: number | null },
+  withWord = false
+): string | null {
+  if (!offer.has_scheme) return null;
+  const numbers = offer.scheme_buy_qty != null && offer.scheme_free_qty != null
+    ? `${offer.scheme_buy_qty}+${offer.scheme_free_qty}`
+    : null;
+  if (!withWord) return numbers ?? "Scheme";
+  return numbers ? `${numbers} scheme` : "scheme";
+}
+
 function flattenCandidates(item: ProposalItem): { supplier: string; candidate: Candidate }[] {
   return Object.keys(item.candidates).flatMap((supplier) =>
     item.candidates[supplier].map((candidate) => ({ supplier, candidate }))
@@ -345,7 +365,7 @@ function ReviewItem({
                     >
                       {fc.supplier} &mdash; {fc.candidate.matched_product_name} (Qty {fc.candidate.available_qty}
                       {fc.candidate.ptr != null ? `, PTR ${money(fc.candidate.ptr)}` : ""}
-                      {fc.candidate.has_scheme ? ", scheme" : ""}
+                      {schemeLabel(fc.candidate, true) ? `, ${schemeLabel(fc.candidate, true)}` : ""}
                       {!fc.candidate.confident ? ", low-confidence match" : ""})
                     </option>
                   ))}
@@ -928,8 +948,8 @@ function App() {
                         <td>{m.supplier}</td>
                         <td className="num">{m.qty}</td>
                         <td>
-                          <span className={`pill ${m.has_scheme ? "pill--yes" : "pill--no"}`}>
-                            {m.has_scheme ? "Yes" : "No"}
+                          <span className={`pill ${m.has_scheme ? "pill--yes" : "pill--no"} num`}>
+                            {schemeLabel(m) ?? "No"}
                           </span>
                         </td>
                       </tr>
