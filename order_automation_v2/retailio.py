@@ -5,10 +5,30 @@ from playwright.sync_api import Page, BrowserContext
 from config import ORDER_SITE_URL
 
 
-def ensure_logged_in(context: BrowserContext, on_waiting=None, timeout_seconds: int = 600) -> None:
+class PipelineCancelled(Exception):
+    """Raised to unwind the pipeline when a cooperative cancellation
+    checkpoint (should_cancel()) sees the owner clicked Cancel. Deliberately
+    checked only from within the pipeline's own thread at safe points
+    between Playwright calls - never by reaching into another thread's
+    Playwright objects (e.g. closing a BrowserContext from a different
+    thread than the one that created it), which Playwright's sync API does
+    not support and can behave unpredictably depending on which call it
+    interrupts."""
+
+
+def ensure_logged_in(context: BrowserContext, on_waiting=None, timeout_seconds: int = 600, should_cancel=None) -> None:
     """Confirms the persistent profile has a valid Retailio session, opening
     a visible tab and waiting for the user to manually complete login/OTP
-    there if the session has expired. Closes the tab once logged in."""
+    there if the session has expired. Closes the tab once logged in.
+
+    should_cancel, if given, is polled at each checkpoint (immediately, and
+    then once per 2s wait while waiting on manual login) and raises
+    PipelineCancelled if it returns True - this is the longest possible
+    wait in the whole pipeline (up to timeout_seconds), so it's the most
+    important place to be promptly cancellable."""
+    if should_cancel and should_cancel():
+        raise PipelineCancelled("Cancelled before checking Retailio login")
+
     page = context.new_page()
     page.goto(ORDER_SITE_URL)
 
@@ -23,6 +43,8 @@ def ensure_logged_in(context: BrowserContext, on_waiting=None, timeout_seconds: 
     while "distributor-specific-order" not in page.url:
         if time.time() > deadline:
             raise TimeoutError("Timed out waiting for manual Retailio login/OTP")
+        if should_cancel and should_cancel():
+            raise PipelineCancelled("Cancelled while waiting for manual login")
         if not warned and on_waiting:
             on_waiting()
             warned = True

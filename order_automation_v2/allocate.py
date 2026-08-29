@@ -1,5 +1,5 @@
 from config import SUPPLIERS
-from retailio import search_all_offers, select_and_add_to_cart
+from retailio import search_all_offers, select_and_add_to_cart, PipelineCancelled
 from matching import similarity, is_confident_match
 
 # A scheme requiring you to buy more than this many units to get the free
@@ -27,17 +27,22 @@ def _scheme_worth_switching_for(offer: dict, required_qty: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def gather_candidates(pages: dict, item: dict, on_progress=None) -> None:
+def gather_candidates(pages: dict, item: dict, on_progress=None, should_cancel=None) -> None:
     """Searches every supplier's tab for this item and records every
     in-stock candidate, confidence-scored, without deciding or committing
     anything. Mutates item in place: fills item['candidates'] (supplier ->
     list of scored candidate dicts) and item['low_confidence_matches']
     (suppliers with no confident match at all - same near-miss reporting
-    "Needs Review" has always shown)."""
+    "Needs Review" has always shown). Checks should_cancel between each
+    supplier - this is the innermost/tightest cancellation checkpoint, since
+    this loop (times every curated item) is where the bulk of Phase A's
+    time is actually spent."""
     item["candidates"] = {}
     item["low_confidence_matches"] = []
 
     for supplier in SUPPLIERS:
+        if should_cancel and should_cancel():
+            raise PipelineCancelled("Cancelled while matching products")
         offers = search_all_offers(pages[supplier], item["product_name"])
         in_stock = [o for o in offers if o["available_qty"] > 0]
 
@@ -123,12 +128,18 @@ def propose_allocations(item: dict) -> None:
         exhausted.add(winner)
 
 
-def build_proposal(pages: dict, curated_list: list, on_progress=None) -> None:
+def build_proposal(pages: dict, curated_list: list, on_progress=None, should_cancel=None) -> None:
     """Phase A entry point: for every curated item, gather every supplier's
     candidates and work out a default proposed split. Never adds anything to
-    a cart."""
+    a cart. should_cancel is checked here (between items) and again inside
+    gather_candidates (between suppliers, within one item) - raises
+    PipelineCancelled rather than returning a partial result, since the
+    caller's job is just to unwind cleanly back to idle, not to salvage
+    whatever was matched so far."""
     for item in curated_list:
-        gather_candidates(pages, item, on_progress=on_progress)
+        if should_cancel and should_cancel():
+            raise PipelineCancelled("Cancelled while matching products")
+        gather_candidates(pages, item, on_progress=on_progress, should_cancel=should_cancel)
         propose_allocations(item)
         if on_progress:
             on_progress(

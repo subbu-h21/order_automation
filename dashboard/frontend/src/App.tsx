@@ -23,6 +23,7 @@ const ACTION_REASON_LABELS: Record<string, string> = {
   proposal_pending: "A proposal is already waiting for review below - confirm or discard it first.",
   no_pending_proposal: "There's no pending proposal anymore - this page may be out of date, refreshing...",
   unknown_branch: "Unknown branch selected.",
+  not_cancellable: "Nothing cancellable right now - it may have already finished.",
 };
 
 interface StageDef {
@@ -357,18 +358,21 @@ function ReviewItem({
                     updateLine(idx, { supplier, matched_product_name });
                   }}
                 >
-                  {flatCandidates.map((fc) => (
-                    <option
-                      key={lineKey(fc.supplier, fc.candidate.matched_product_name)}
-                      value={lineKey(fc.supplier, fc.candidate.matched_product_name)}
-                      disabled={usedElsewhere.has(lineKey(fc.supplier, fc.candidate.matched_product_name))}
-                    >
-                      {fc.supplier} &mdash; {fc.candidate.matched_product_name} (Qty {fc.candidate.available_qty}
-                      {fc.candidate.ptr != null ? `, PTR ${money(fc.candidate.ptr)}` : ""}
-                      {schemeLabel(fc.candidate, true) ? `, ${schemeLabel(fc.candidate, true)}` : ""}
-                      {!fc.candidate.confident ? ", low-confidence match" : ""})
-                    </option>
-                  ))}
+                  {flatCandidates.map((fc) => {
+                    const scheme = schemeLabel(fc.candidate, true);
+                    return (
+                      <option
+                        key={lineKey(fc.supplier, fc.candidate.matched_product_name)}
+                        value={lineKey(fc.supplier, fc.candidate.matched_product_name)}
+                        disabled={usedElsewhere.has(lineKey(fc.supplier, fc.candidate.matched_product_name))}
+                      >
+                        {fc.supplier} &mdash; {fc.candidate.matched_product_name} (Qty {fc.candidate.available_qty}
+                        {fc.candidate.ptr != null ? `, PTR ${money(fc.candidate.ptr)}` : ""}
+                        {scheme ? `, ${scheme}` : ""}
+                        {!fc.candidate.confident ? ", low-confidence match" : ""})
+                      </option>
+                    );
+                  })}
                 </select>
                 <div className="field review-qty-field">
                   <label htmlFor={`qty-${safeId(item.product_name)}-${idx}`}>Qty</label>
@@ -499,6 +503,7 @@ function App() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [selections, setSelections] = useState<Selection[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const seededProposalId = useRef<string | null>(null);
 
@@ -525,6 +530,15 @@ function App() {
     }).then((r) => r.json());
     if (!res.started) setActionError(ACTION_REASON_LABELS[res.reason] ?? "Couldn't start - please try again.");
     setStarting(false);
+    poll();
+  };
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    setActionError(null);
+    const res = await fetch(`${API_BASE}/cancel`, { method: "POST" }).then((r) => r.json());
+    if (!res.cancelled) setActionError(ACTION_REASON_LABELS[res.reason] ?? "Couldn't cancel - please try again.");
+    setCancelling(false);
     poll();
   };
 
@@ -751,6 +765,12 @@ function App() {
         <button onClick={handleFetchOrder} disabled={isRunning || starting || !selectedBranch || !canFetch}>
           {isRunning && stage === "building_proposal" ? "Building proposal..." : "Fetch order"}
         </button>
+
+        {stage === "building_proposal" && (
+          <button type="button" className="logout-button" onClick={handleCancel} disabled={cancelling}>
+            {cancelling ? "Cancelling..." : "Cancel"}
+          </button>
+        )}
 
         {!canFetch && (
           <p className="review-summary" style={{ margin: 0 }}>

@@ -23,7 +23,7 @@ from auth import (
 )
 from crm import fetch_orders_for_supplier, sanitize_filename
 from curated_list import build_curated_list
-from retailio import ensure_logged_in, open_supplier_tab
+from retailio import ensure_logged_in, open_supplier_tab, PipelineCancelled
 from allocate import build_proposal, commit_selections
 import proposal_store
 
@@ -77,6 +77,19 @@ _state = {
     "confirmed_by": None,
     "branch": None,
 }
+
+# Deliberately NOT part of _state - purely internal bookkeeping the
+# frontend never needs to see (and _state gets returned wholesale, as JSON,
+# by /status). Guarded by _lock like every other piece of shared state in
+# this file. This is a cooperative flag only - /cancel just sets it; the
+# pipeline thread is the only thing that ever checks it or acts on it, at
+# safe checkpoints between Playwright calls (see retailio.PipelineCancelled).
+# Deliberately NOT implemented as closing the run's BrowserContext from the
+# /cancel request thread - Playwright's sync API doesn't support being
+# driven from a thread other than the one that created it, and closing a
+# context out from under an arbitrary in-flight call risks undefined
+# behavior depending on which call it interrupts.
+_cancel_requested = False
 
 
 def _load_persisted_proposal() -> None:
@@ -256,10 +269,18 @@ def _launch_retailio_context(p):
     )
 
 
+def _should_cancel() -> bool:
+    with _lock:
+        return _cancel_requested
+
+
 def _run_build_proposal(username: str, password: str) -> None:
     """Phase A: fetch CRM orders, curate them, search/match/price every
     supplier's catalog, and work out a default suggested split. Never adds
-    anything to a cart - the result is a proposal for the owner to review."""
+    anything to a cart - the result is a proposal for the owner to review.
+    Cancellable (POST /cancel) at several checkpoints - always safe to
+    interrupt since nothing here ever touches a cart."""
+    global _cancel_requested
     try:
         with sync_playwright() as p:
             context = _launch_retailio_context(p)
@@ -270,12 +291,14 @@ def _run_build_proposal(username: str, password: str) -> None:
                 _set_phase("waiting_for_manual_login")
                 _log("Waiting for you to complete login/OTP in the opened browser window...")
 
-            ensure_logged_in(context, on_waiting=on_waiting)
+            ensure_logged_in(context, on_waiting=on_waiting, should_cancel=_should_cancel)
             _log("Retailio login confirmed.")
 
             _set_phase("fetching_crm")
             crm_page = context.pages[0] if context.pages else context.new_page()
             for supplier in CRM_SUPPLIERS:
+                if _should_cancel():
+                    raise PipelineCancelled("Cancelled during CRM fetch")
                 _log(f"Fetching CRM orders for {supplier}...")
                 df = fetch_orders_for_supplier(crm_page, supplier, username, password)
                 if df.empty:
@@ -285,34 +308,43 @@ def _run_build_proposal(username: str, password: str) -> None:
                 df.to_excel(output_path, index=False)
                 _log(f"Exported {len(df)} rows for {supplier}")
 
+            if _should_cancel():
+                raise PipelineCancelled("Cancelled before building the curated list")
+
             _set_phase("building_curated_list")
             curated_list = build_curated_list()
             _log(f"Curated list has {len(curated_list)} products")
 
             _set_phase("matching_products")
-            pages = {
-                supplier: open_supplier_tab(context, SUPPLIER_DISTRIBUTOR_NAMES[supplier])
-                for supplier in SUPPLIERS
-            }
-            build_proposal(pages, curated_list, on_progress=_log)
+            pages = {}
+            for supplier in SUPPLIERS:
+                if _should_cancel():
+                    raise PipelineCancelled("Cancelled while opening supplier tabs")
+                pages[supplier] = open_supplier_tab(context, SUPPLIER_DISTRIBUTOR_NAMES[supplier])
+            build_proposal(pages, curated_list, on_progress=_log, should_cancel=_should_cancel)
 
             with _lock:
                 _state["proposal"] = {"proposal_id": str(uuid.uuid4()), "items": curated_list}
                 _state["stage"] = "proposal_ready"
 
             _set_phase("done")
+    except PipelineCancelled:
+        _log("Cancelled by user.")
+        with _lock:
+            _state["stage"] = "idle"
     except Exception:
         error_text = traceback.format_exc()
         _log(error_text)
         with _lock:
             _state["error"] = error_text
-            # Nothing usable was produced - don't leave /fetch-order blocked
-            # by a phantom "proposal pending" state.
+            # Nothing usable was produced - don't leave /fetch-order
+            # blocked by a phantom "proposal pending" state.
             _state["stage"] = "idle"
     finally:
         with _lock:
             _state["running"] = False
             _state["done"] = True
+            _cancel_requested = False
         _persist_state()
 
 
@@ -454,6 +486,32 @@ def fetch_order(request: FetchOrderRequest, current_user: str = Depends(get_curr
     return {"started": True}
 
 
+@app.post("/cancel")
+def cancel(current_user: str = Depends(get_current_user)):
+    """Stops an in-progress Phase A ("Building proposal") run. Deliberately
+    only valid during building_proposal - Phase B ("Confirm & place
+    orders") isn't cancellable here, since interrupting it mid-line could
+    leave a real cart in an unclear state with no way to know what did or
+    didn't get added; Phase A never touches a cart, so it's always safe to
+    interrupt.
+
+    Just sets a flag - the pipeline thread itself is the only thing that
+    ever checks it (at cooperative checkpoints between Playwright calls,
+    see retailio.PipelineCancelled) and acts on it. This endpoint never
+    touches Playwright directly: closing a running BrowserContext from this
+    request-handling thread - a different thread than the one that created
+    it - isn't something Playwright's sync API supports, and can behave
+    unpredictably depending on which call it interrupts. Cancellation may
+    take a few seconds to actually land (however long the current
+    in-flight step takes to reach its next checkpoint), not instantly."""
+    global _cancel_requested
+    with _lock:
+        if not _state["running"] or _state["stage"] != "building_proposal":
+            return {"cancelled": False, "reason": "not_cancellable"}
+        _cancel_requested = True
+    return {"cancelled": True}
+
+
 @app.post("/discard-proposal")
 def discard_proposal(current_user: str = Depends(get_current_user)):
     with _lock:
@@ -467,6 +525,8 @@ def discard_proposal(current_user: str = Depends(get_current_user)):
         _state["log"] = []
         _state["error"] = None
         _state["done"] = False
+        _state["branch"] = None
+        _state["started_by"] = None
     proposal_store.clear_proposal()
     return {"discarded": True}
 
