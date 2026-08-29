@@ -28,13 +28,12 @@ def build_curated_list() -> list:
             if name not in merged or qty > merged[name]:
                 merged[name] = qty
 
+    # Just the two fields that actually matter here - allocate.py's
+    # gather_candidates/propose_allocations initialize everything else
+    # (candidates, proposed_allocations, remaining_qty, low_confidence_matches)
+    # themselves per item, so pre-seeding them here would just be dead weight
+    # that gets overwritten before anything reads it.
     return [
-        {
-            "product_name": name,
-            "required_qty": qty,
-            "remaining_qty": qty,
-            "allocations": [],
-            "low_confidence_matches": [],
-        }
+        {"product_name": name, "required_qty": qty}
         for name, qty in merged.items()
     ]

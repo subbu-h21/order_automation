@@ -63,6 +63,17 @@ def _primary_cards(page: Page):
     return page.locator('[id^="product-list-"]:not([id*="non-selected"])')
 
 
+_MRP_RE = re.compile(r"MRP:\s*(?:₹|Rs\.?)?\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+_PTR_RE = re.compile(r"PTR:\s*(?:₹|Rs\.?)?\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def _parse_price(pattern: "re.Pattern[str]", card_text: str) -> float | None:
+    match = pattern.search(card_text)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
 def _parse_card(card_text: str) -> dict:
     has_scheme = "scheme:" in card_text.lower()
     qty_match = re.search(r"Qty\s+([\d,]+)", card_text)
@@ -78,6 +89,13 @@ def _parse_card(card_text: str) -> dict:
         "has_scheme": has_scheme,
         "scheme_buy_qty": scheme_buy_qty,
         "scheme_free_qty": scheme_free_qty,
+        # MRP (regulated retail price, ~fixed regardless of supplier) and PTR
+        # ("price to retailer" - what the pharmacy actually pays, and the
+        # number that genuinely differs between suppliers) - both sit
+        # plainly on the list card's own text, confirmed against a live
+        # card: "MRP:\n₹ 145.00\nMargin:\n20%\nPTR:\n₹ 110.48".
+        "mrp": _parse_price(_MRP_RE, card_text),
+        "ptr": _parse_price(_PTR_RE, card_text),
         "card_text": card_text,
         "matched_product_name": matched_product_name,
     }
@@ -192,13 +210,13 @@ def select_and_add_to_cart(page: Page, product_name: str, index: int, qty: int, 
                 f"{product_name}: couldn't confirm this batch's hidden order-quantity "
                 f"limits in time - skipping it to be safe rather than risk over-ordering"
             )
-        close_modal(page)
+        close_modal(page, on_progress=on_progress)
         return 0
 
     actual_qty = _capped_qty(qty, inventory)
 
     if actual_qty <= 0:
-        close_modal(page)
+        close_modal(page, on_progress=on_progress)
         return 0
 
     qty_input = page.locator("#distributor-specific-order-quantity")
@@ -208,12 +226,26 @@ def select_and_add_to_cart(page: Page, product_name: str, index: int, qty: int, 
     add_button.click()
     page.wait_for_timeout(1000)
 
-    close_modal(page)
+    close_modal(page, on_progress=on_progress)
     return actual_qty
 
 
-def close_modal(page: Page) -> None:
-    close_button = page.locator("div.close-button")
-    if close_button.count() > 0:
-        close_button.click()
-        page.wait_for_timeout(300)
+def close_modal(page: Page, on_progress=None) -> None:
+    """Best-effort: closes the product detail modal if one is open. Must
+    never raise - this is just tidying up before the next search, and
+    Angular sometimes tears down/re-renders div.close-button (e.g. its own
+    close animation) right as we try to click it, which without a bound
+    times out after Playwright's 30s default and previously took the whole
+    pipeline run down with it. A short timeout here means a stuck/detached
+    button fails fast instead; either way we log and move on rather than
+    let a UI-close race kill an otherwise-successful cart add."""
+    try:
+        close_button = page.locator("div.close-button")
+        if close_button.count() > 0:
+            close_button.click(timeout=8000)
+            page.wait_for_timeout(300)
+    except Exception as exc:
+        if on_progress:
+            on_progress(
+                f"Couldn't close the product modal cleanly ({exc.__class__.__name__}) - continuing anyway"
+            )
